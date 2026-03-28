@@ -345,10 +345,7 @@ impl Tool for BashTool {
         if let Some(cwd) = &args.cwd {
             cmd.current_dir(cwd);
         }
-        let output = cmd
-            .output()
-            .await
-            .map_err(|e| ToolError::ToolCallError(e.to_string().into()))?;
+        let output = cmd.output().await.map_err(|e| ToolError::ToolCallError(format!("Failed to execute bash command '{}': {}", args.command, e).into()))?;
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -366,7 +363,7 @@ impl Tool for BashTool {
             result.push_str(&stderr);
         }
         if exit_code != 0 {
-            result.push_str(&format!("\n[exit code: {exit_code}]"));
+            result.push_str(&format!("\n[exit code: {exit_code}] - Command '{}' failed with error.", args.command));
         }
 
         Ok(result)
