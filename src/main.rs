@@ -9,6 +9,7 @@
 use rig::agent::Agent;
 use rig::client::{CompletionClient, ProviderClient};
 use rig::completion::{CompletionModel, Prompt, ToolDefinition};
+use rig::agent::PromptResponse;
 use rig::providers::openrouter;
 use rig::tool::{Tool, ToolError};
 use schemars::{JsonSchema, schema_for};
@@ -115,6 +116,8 @@ async fn main() -> Result<(), anyhow::Error> {
 
     let mut current_model = model.clone();
     let mut agent = build_agent(&current_model);
+    // Cumulative (input_tokens, output_tokens) for the session
+    let mut session_tokens: (u64, u64) = (0, 0);
 
     // Piped mode: read all of stdin as a single prompt, run once, exit
     if !io::stdin().is_terminal() {
@@ -127,7 +130,7 @@ async fn main() -> Result<(), anyhow::Error> {
         }
 
         eprintln!("{DIM}  batstone (piped mode) — model: {current_model}{RESET}");
-        run_prompt(&mut agent, input).await;
+        run_prompt(&mut agent, input, &mut session_tokens).await;
         return Ok(());
     }
 
@@ -198,7 +201,7 @@ async fn main() -> Result<(), anyhow::Error> {
             continue;
         }
 
-        run_prompt(&mut agent, &input).await;
+        run_prompt(&mut agent, &input, &mut session_tokens).await;
     }
 
     println!("\n{DIM}  bye 👋{RESET}\n");
@@ -236,7 +239,7 @@ async fn detect_git_branch() -> Option<String> {
     }
 }
 
-async fn run_prompt<T: CompletionModel>(agent: &mut Agent<T>, input: &str) {
+async fn run_prompt<T: CompletionModel>(agent: &mut Agent<T>, input: &str, session_tokens: &mut (u64, u64)) {
     // Show a "thinking" indicator while waiting for the model.
     eprint!("{DIM}  thinking… (Ctrl+C to cancel){RESET}");
     let _ = io::stderr().flush();
@@ -244,10 +247,22 @@ async fn run_prompt<T: CompletionModel>(agent: &mut Agent<T>, input: &str) {
     // Race the model call against a Ctrl+C signal so the user can cancel
     // a long-running turn without killing the whole process.
     tokio::select! {
-        result = agent.prompt(input) => {
+        result = agent.prompt(input).extended_details() => {
             eprint!("\r\x1b[2K");
             match result {
-                Ok(response) => println!("{}", response),
+                Ok(PromptResponse { output, usage, .. }) => {
+                    // Accumulate session token counts
+                    session_tokens.0 += usage.input_tokens;
+                    session_tokens.1 += usage.output_tokens;
+                    println!("{}", output);
+                    if usage.input_tokens > 0 || usage.output_tokens > 0 {
+                        eprintln!(
+                            "{DIM}  tokens this turn: {}↑ {}↓  |  session total: {}↑ {}↓{RESET}",
+                            usage.input_tokens, usage.output_tokens,
+                            session_tokens.0, session_tokens.1
+                        );
+                    }
+                }
                 Err(e) => eprintln!("{RED}  error: {e}{RESET}"),
             }
         }
