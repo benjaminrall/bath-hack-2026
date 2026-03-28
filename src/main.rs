@@ -8,16 +8,14 @@
 
 use rig::agent::Agent;
 use rig::client::{CompletionClient, ProviderClient};
-use rig::completion::{CompletionModel, Prompt, ToolDefinition, Usage};
+use rig::completion::{CompletionModel, Prompt, ToolDefinition};
 use rig::providers::openrouter;
 use rig::tool::{Tool, ToolError};
-use rig::wasm_compat::{WasmCompatSend, WasmCompatSync};
 use schemars::{JsonSchema, schema_for};
 use serde::{Deserialize, Serialize};
 use serde_json::to_value;
 use std::io;
 use std::io::{BufRead, IsTerminal, Read, Write};
-use std::path::Path;
 use tokio::process::Command;
 
 // ANSI colour helpers
@@ -58,14 +56,6 @@ fn print_banner() {
     println!("{DIM}  Type /quit to exit, /clear to reset{RESET}\n");
 }
 
-fn print_usage(usage: &Usage) {
-    if usage.input_tokens > 0 || usage.output_tokens > 0 {
-        println!(
-            "\n{DIM}  tokens: {} in / {} out{RESET}",
-            usage.input_tokens, usage.output_tokens
-        );
-    }
-}
 
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
@@ -119,7 +109,7 @@ async fn main() -> Result<(), anyhow::Error> {
                 Box::new(EditFileTool),
                 Box::new(SearchTool),
             ])
-            .default_max_turns(10)
+            .default_max_turns(1000)
             .build()
     };
 
