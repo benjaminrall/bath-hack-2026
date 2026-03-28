@@ -76,6 +76,7 @@ async fn main() -> Result<(), anyhow::Error> {
     let mut agent = client
         .agent(&model)
         .preamble(SYSTEM_PROMPT)
+        .tools(vec![Box::new(ReadFileTool), Box::new(WriteFileTool)])
         .build();
 
     // Piped mode: read all of stdin as a single prompt, run once, exit
@@ -148,6 +149,7 @@ struct ReadFileTool;
 
 #[derive(Serialize, Deserialize, JsonSchema)]
 struct ReadFileToolArgs {
+    /// The path to the file you want to read
     pub path: String,
 }
 impl Tool for ReadFileTool {
@@ -159,12 +161,50 @@ impl Tool for ReadFileTool {
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
             name: Self::NAME.to_string(),
-            description: "Reads the contents of a file".to_string(),
+            description: "Reads the contents of a file.".to_string(),
             parameters: to_value(schema_for!(ReadFileToolArgs)).unwrap(),
         }
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        todo!()
+        tokio::fs::read_to_string(&args.path)
+            .await
+            .map_err(|e| ToolError::ToolCallError(
+                format!("Failed to read file at {}: {}", args.path, e).into()
+            ))
+    }
+}
+
+struct WriteFileTool;
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+struct WriteFileToolArgs {
+    /// The path where the file should be written
+    pub path: String,
+    /// The complete content to write into the file
+    pub content: String,
+}
+impl Tool for WriteFileTool {
+    const NAME: &'static str = "write_file";
+    type Error = ToolError;
+    type Args = WriteFileToolArgs;
+    type Output = String;
+
+    async fn definition(&self, _prompt: String) -> ToolDefinition {
+        ToolDefinition {
+            name: Self::NAME.to_string(),
+            description: "Writes content to a file, creating it if it doesn't exist or overwriting it if it does.".to_string(),
+            parameters: to_value(schema_for!(WriteFileToolArgs)).unwrap(),
+        }
+    }
+
+    async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        tokio::fs::write(&args.path, &args.content)
+            .await
+            .map_err(|e| ToolError::ToolCallError(
+                format!("Failed to write file at {}: {}", args.path, e).into()
+            ))?;
+
+        Ok(format!("Successfully wrote {} bytes to {}", args.content.len(), args.path))
     }
 }
