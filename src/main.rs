@@ -294,9 +294,18 @@ impl Tool for WriteFileTool {
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
         tokio::fs::write(&args.path, &args.content)
             .await
-            .map_err(|e| ToolError::ToolCallError(
-                format!("Error writing to file '{}': Ensure the file path is correct and accessible. Error: {}", args.path, e).into()
-            ))?;
+            .map_err(|e| {
+                // Enhanced error messages for different possible causes
+                let detailed_error = match e.kind() {
+                    std::io::ErrorKind::NotFound => "File path not found.",
+                    std::io::ErrorKind::PermissionDenied => "Permission denied to write file.",
+                    std::io::ErrorKind::AlreadyExists => "File already exists.",
+                    _ => "Unexpected error occurred.",
+                };
+                ToolError::ToolCallError(
+                    format!("Error writing to file '{}' ({}). Original error: {}", args.path, detailed_error, e).into()
+                )
+            })?;
 
         Ok(format!("Successfully wrote {} bytes to {}", args.content.len(), args.path))
     }
