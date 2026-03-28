@@ -4,6 +4,7 @@
 //!   /quit, /exit    Exit the agent
 //!   /clear          Clear conversation history
 //!   /model <name>   Switch model mid-session
+//!   /usage          Show session token usage
 //!   /help           Show available commands
 
 use rig::agent::Agent;
@@ -43,6 +44,7 @@ fn print_help() {
     println!("  /help              Show this help");
     println!("  /clear             Clear conversation history");
     println!("  /model <name>      Switch model mid-session");
+    println!("  /usage             Show session token usage");
     println!("  /quit, /exit       Exit the agent\n");
 }
 
@@ -183,7 +185,14 @@ async fn main() -> Result<(), anyhow::Error> {
                 }
                 ReplCommand::Clear => {
                     agent = build_agent(&current_model);
-                    println!("{DIM}  conversation cleared{RESET}");
+                    session_tokens = (0, 0);
+                    println!("{DIM}  conversation cleared, token count reset{RESET}");
+                }
+                ReplCommand::Usage => {
+                    println!(
+                        "{DIM}  session tokens: {}↑ {}↓{RESET}",
+                        session_tokens.0, session_tokens.1
+                    );
                 }
                 ReplCommand::Model(None) => {
                     println!("{DIM}  current model: {current_model}{RESET}");
@@ -697,6 +706,8 @@ enum ReplCommand<'a> {
     Clear,
     /// /model with an optional argument. None means "show current model".
     Model(Option<&'a str>),
+    /// /usage shows cumulative token counts for the session
+    Usage,
     Unknown(&'a str),
 }
 
@@ -714,6 +725,7 @@ fn parse_command(input: &str) -> Option<ReplCommand<'_>> {
         "/quit" | "/exit" => ReplCommand::Quit,
         "/help" => ReplCommand::Help,
         "/clear" => ReplCommand::Clear,
+        "/usage" => ReplCommand::Usage,
         "/model" => {
             if rest.is_empty() {
                 ReplCommand::Model(None)
@@ -801,6 +813,11 @@ mod tests {
             parse_command("/model   anthropic/claude-3-5-sonnet"),
             Some(ReplCommand::Model(Some("anthropic/claude-3-5-sonnet")))
         );
+    }
+
+    #[test]
+    fn test_parse_command_usage() {
+        assert_eq!(parse_command("/usage"), Some(ReplCommand::Usage));
     }
 
     #[test]
