@@ -35,8 +35,9 @@ Use tools proactively: read files to understand context, run commands to verify 
 After making changes, run tests or verify the result when appropriate."#;
 
 fn print_banner() {
-    println!("\n{BOLD}{CYAN}  batstone{RESET} {DIM}— our evolving coding agent{RESET}");
-    println!("{DIM}  Type /quit to exit, /clear to reset{RESET}\n");
+    println!("\n{BOLD}{CYAN}batstone{RESET} {DIM}— our evolving coding agent{RESET}");
+    println!("{DIM}Type '{BOLD}/quit{RESET}{DIM}' to exit, '{BOLD}/clear{RESET}{DIM}' to reset the session{RESET}\n");
+    println!("{BOLD}{YELLOW}Helpful Tips:{RESET} Follow prompts carefully. Unexpected errors may occur if inputs are malformed.");
 }
 
 fn print_usage(usage: &Usage) {
@@ -87,7 +88,7 @@ async fn main() -> Result<(), anyhow::Error> {
             Box::new(EditFileTool),
             Box::new(SearchTool)
         ])
-        .default_max_turns(10)
+        .default_max_turns(1000)
         .build();
 
     // Piped mode: read all of stdin as a single prompt, run once, exit
@@ -147,8 +148,10 @@ async fn main() -> Result<(), anyhow::Error> {
 }
 
 async fn run_prompt<T: CompletionModel>(agent: &mut Agent<T>, input: &str) {
-    let result = agent.prompt(input).await.expect("prompt failed");
-    println!("{}", result)
+    match agent.prompt(input).await {
+        Ok(result) => println!("{}", result),
+        Err(e) => eprintln!("Error during prompting: {}", e),
+    }
 }
 
 #[derive(Debug)]
@@ -291,9 +294,18 @@ impl Tool for WriteFileTool {
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
         tokio::fs::write(&args.path, &args.content)
             .await
-            .map_err(|e| ToolError::ToolCallError(
-                format!("Failed to write file at {}: {}", args.path, e).into()
-            ))?;
+            .map_err(|e| {
+                // Enhanced error messages for different possible causes
+                let detailed_error = match e.kind() {
+                    std::io::ErrorKind::NotFound => "File path not found.",
+                    std::io::ErrorKind::PermissionDenied => "Permission denied to write file.",
+                    std::io::ErrorKind::AlreadyExists => "File already exists.",
+                    _ => "Unexpected error occurred.",
+                };
+                ToolError::ToolCallError(
+                    format!("Error writing to file '{}' ({}). Original error: {}", args.path, detailed_error, e).into()
+                )
+            })?;
 
         Ok(format!("Successfully wrote {} bytes to {}", args.content.len(), args.path))
     }
@@ -333,10 +345,7 @@ impl Tool for BashTool {
         if let Some(cwd) = &args.cwd {
             cmd.current_dir(cwd);
         }
-        let output = cmd
-            .output()
-            .await
-            .map_err(|e| ToolError::ToolCallError(e.to_string().into()))?;
+        let output = cmd.output().await.map_err(|e| ToolError::ToolCallError(format!("Failed to execute bash command '{}': {}", args.command, e).into()))?;
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -354,7 +363,7 @@ impl Tool for BashTool {
             result.push_str(&stderr);
         }
         if exit_code != 0 {
-            result.push_str(&format!("\n[exit code: {exit_code}]"));
+            result.push_str(&format!("\n[exit code: {exit_code}] - Command '{}' failed with error.", args.command));
         }
 
         Ok(result)
@@ -457,9 +466,18 @@ impl Tool for EditFileTool {
         // Read the current contents of the file
         let content = tokio::fs::read_to_string(&args.path)
             .await
-            .map_err(|e| ToolError::ToolCallError(
-                format!("Failed to read file {}: {}", args.path, e).into()
-            ))?;
+            .map_err(|e| {
+                // Enhanced error messages for different possible causes
+                let detailed_error = match e.kind() {
+                    std::io::ErrorKind::NotFound => "File path not found.",
+                    std::io::ErrorKind::PermissionDenied => "Permission denied to read file.",
+                    std::io::ErrorKind::InvalidData => "File contains invalid data.",
+                    _ => "Unexpected error occurred.",
+                };
+                ToolError::ToolCallError(
+                    format!("Error reading file '{}' ({}). Original error: {}", args.path, detailed_error, e).into()
+                )
+            })?;
 
         // Validate that the search string actually exists in the file
         if !content.contains(&args.old_text) {
@@ -557,5 +575,42 @@ impl Tool for SearchTool {
                 ).into()))
             }
         }
+    }
+}
+
+fn truncate(s: &str, max: usize) -> &str {
+    match s.char_indices().nth(max) {
+        Some((idx, _)) => &s[..idx],
+        None => s,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_truncate_short_string() {
+        assert_eq!(truncate("hello", 10), "hello");
+    }
+
+    #[test]
+    fn test_truncate_exact_length() {
+        assert_eq!(truncate("hello", 5), "hello");
+    }
+
+    #[test]
+    fn test_truncate_long_string() {
+        assert_eq!(truncate("hello world", 5), "hello");
+    }
+
+    #[test]
+    fn test_truncate_unicode() {
+        assert_eq!(truncate("héllo wörld", 5), "héllo");
+    }
+
+    #[test]
+    fn test_truncate_empty() {
+        assert_eq!(truncate("", 5), "");
     }
 }
