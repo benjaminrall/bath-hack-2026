@@ -196,19 +196,22 @@ async fn main() -> Result<(), anyhow::Error> {
 
 async fn run_prompt<T: CompletionModel>(agent: &mut Agent<T>, input: &str) {
     // Show a "thinking" indicator while waiting for the model.
-    // We print it immediately, then erase it once the response arrives.
-    eprint!("{DIM}  thinking…{RESET}");
+    eprint!("{DIM}  thinking… (Ctrl+C to cancel){RESET}");
     let _ = io::stderr().flush();
 
-    match agent.prompt(input).await {
-        Ok(result) => {
-            // Erase the indicator line before printing the real response.
+    // Race the model call against a Ctrl+C signal so the user can cancel
+    // a long-running turn without killing the whole process.
+    tokio::select! {
+        result = agent.prompt(input) => {
             eprint!("\r\x1b[2K");
-            println!("{}", result);
+            match result {
+                Ok(response) => println!("{}", response),
+                Err(e) => eprintln!("{RED}  error: {e}{RESET}"),
+            }
         }
-        Err(e) => {
+        _ = tokio::signal::ctrl_c() => {
             eprint!("\r\x1b[2K");
-            eprintln!("{RED}  error: {e}{RESET}");
+            eprintln!("{YELLOW}  cancelled{RESET}");
         }
     }
 }
