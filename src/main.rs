@@ -466,9 +466,18 @@ impl Tool for EditFileTool {
         // Read the current contents of the file
         let content = tokio::fs::read_to_string(&args.path)
             .await
-            .map_err(|e| ToolError::ToolCallError(
-                format!("Failed to read file {}: {}", args.path, e).into()
-            ))?;
+            .map_err(|e| {
+                // Enhanced error messages for different possible causes
+                let detailed_error = match e.kind() {
+                    std::io::ErrorKind::NotFound => "File path not found.",
+                    std::io::ErrorKind::PermissionDenied => "Permission denied to read file.",
+                    std::io::ErrorKind::InvalidData => "File contains invalid data.",
+                    _ => "Unexpected error occurred.",
+                };
+                ToolError::ToolCallError(
+                    format!("Error reading file '{}' ({}). Original error: {}", args.path, detailed_error, e).into()
+                )
+            })?;
 
         // Validate that the search string actually exists in the file
         if !content.contains(&args.old_text) {
