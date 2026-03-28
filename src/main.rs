@@ -16,6 +16,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::to_value;
 use std::io;
 use std::io::{BufRead, IsTerminal, Read, Write};
+use std::path::Path;
+use tokio::process::Command;
 
 // ANSI colour helpers
 const RESET: &str = "\x1b[0m";
@@ -68,14 +70,24 @@ async fn main() -> Result<(), anyhow::Error> {
         .filter_map(|(i, _)| args.get(i + 1).cloned())
         .collect();
 
-    let skills = skill_dirs;
+    let skills = load_skills(&skill_dirs);
+    let skills_prompt = format_skills_xml(&skills);
+
+    let full_system_prompt = format!("{}{}", SYSTEM_PROMPT, skills_prompt);
 
     // Create agent with a single context prompt
     let mut agent = client
         .agent(&model)
-        .tool(BashTool)
-        .preamble(SYSTEM_PROMPT)
-        .tools(vec![Box::new(ReadFileTool), Box::new(WriteFileTool)])
+        .preamble(&full_system_prompt)
+        .tools(vec![
+            Box::new(ListFilesTool),
+            Box::new(ReadFileTool),
+            Box::new(WriteFileTool),
+            Box::new(BashTool),
+            Box::new(EditFileTool),
+            Box::new(SearchTool)
+        ])
+        .default_max_turns(10)
         .build();
 
     // Piped mode: read all of stdin as a single prompt, run once, exit
@@ -139,8 +151,89 @@ async fn run_prompt<T: CompletionModel>(agent: &mut Agent<T>, input: &str) {
     println!("{}", result)
 }
 
-/// AgentSkills open standard skill set
-struct SkillSet {}
+#[derive(Debug)]
+struct Skill {
+    name: String,
+    description: String,
+    location: String,
+    tools: Vec<String>,
+}
+
+#[derive(Deserialize)]
+struct SkillFrontmatter {
+    name: String,
+    description: String,
+    tools: Option<Vec<String>>,
+}
+
+/// Parses a SKILL.md file to extract its YAML frontmatter
+fn parse_skill(path: &std::path::Path) -> Option<Skill> {
+    let content = std::fs::read_to_string(path).ok()?;
+
+    // Split the file by "---" to isolate the frontmatter.
+    let parts: Vec<&str> = content.splitn(3, "---").collect();
+
+    if parts.len() == 3 {
+        let yaml_str = parts[1];
+        // Parse the YAML block into our struct
+        if let Ok(frontmatter) = serde_yaml::from_str::<SkillFrontmatter>(yaml_str) {
+            return Some(Skill {
+                name: frontmatter.name,
+                description: frontmatter.description,
+                location: path.to_string_lossy().to_string(),
+                // Convert Option<Vec<String>> to Vec<String>, defaulting to empty
+                tools: frontmatter.tools.unwrap_or_default(),
+            });
+        }
+    }
+    None
+}
+
+/// Scans the provided directories for `skill_name/SKILL.md` structures
+fn load_skills(skill_dirs: &[String]) -> Vec<Skill> {
+    let mut skills = Vec::new();
+
+    for dir in skill_dirs {
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    let skill_file = path.join("SKILL.md");
+                    if skill_file.exists() {
+                        if let Some(skill) = parse_skill(&skill_file) {
+                            skills.push(skill);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    skills
+}
+
+/// Formats the loaded skills into the XML string for the system prompt
+fn format_skills_xml(skills: &[Skill]) -> String {
+    if skills.is_empty() {
+        return String::new();
+    }
+
+    let mut xml = String::from("\n\n<available_skills>\n");
+    for skill in skills {
+        xml.push_str("  <skill>\n");
+        xml.push_str(&format!("    <name>{}</name>\n", skill.name));
+        xml.push_str(&format!("    <description>{}</description>\n", skill.description));
+        xml.push_str(&format!("    <location>{}</location>\n", skill.location));
+
+        if !skill.tools.is_empty() {
+            xml.push_str(&format!("    <tools>{}</tools>\n", skill.tools.join(", ")));
+        }
+
+        xml.push_str("  </skill>\n");
+    }
+    xml.push_str("</available_skills>");
+
+    xml
+}
 
 struct ReadFileTool;
 
@@ -210,7 +303,9 @@ struct BashTool;
 
 #[derive(Serialize, Deserialize, JsonSchema)]
 struct BashToolArgs {
+    /// Command to run
     pub command: String,
+    /// Current working directory in which to invoke the command
     pub cwd: Option<String>,
 }
 
@@ -259,5 +354,204 @@ impl Tool for BashTool {
         }
 
         Ok(result)
+    }
+}
+
+pub struct ListFilesTool;
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct ListFilesToolArgs {
+    /// The directory path to start searching in (e.g., "." for current directory)
+    pub path: String,
+    /// Optional wildcard pattern to match file names (e.g., "*.rs" or "*.json")
+    pub pattern: Option<String>,
+    /// Optional maximum depth for directory traversal to prevent overwhelming output (e.g., 1 or 2)
+    pub max_depth: Option<u32>,
+}
+
+impl Tool for ListFilesTool {
+    const NAME: &'static str = "list_files";
+    type Error = ToolError;
+    type Args = ListFilesToolArgs;
+    type Output = String;
+
+    async fn definition(&self, _prompt: String) -> ToolDefinition {
+        ToolDefinition {
+            name: Self::NAME.to_string(),
+            description: "Lists files and directories using the `find` command. Use max_depth to prevent excessive output in large repositories.".to_string(),
+            parameters: to_value(schema_for!(ListFilesToolArgs)).unwrap(),
+        }
+    }
+
+    async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        let mut cmd = Command::new("find");
+
+        // Start path
+        cmd.arg(&args.path);
+
+        // Apply max depth if provided
+        if let Some(depth) = args.max_depth {
+            cmd.arg("-maxdepth").arg(depth.to_string());
+        }
+
+        // Apply name pattern if provided
+        if let Some(pattern) = &args.pattern {
+            cmd.arg("-name").arg(pattern);
+        }
+
+        // Execute the command asynchronously
+        let output = cmd.output().await.map_err(|e| {
+            ToolError::ToolCallError(format!("Failed to spawn find command: {}", e).into())
+        })?;
+
+        // Check if the command succeeded
+        if output.status.success() {
+            let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+
+            if stdout.trim().is_empty() {
+                Ok("No files found matching the criteria.".to_string())
+            } else {
+                Ok(stdout)
+            }
+        } else {
+            let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+            Err(ToolError::ToolCallError(format!(
+                "find command returned an error: {}",
+                stderr.trim()
+            ).into()))
+        }
+    }
+}
+
+pub struct EditFileTool;
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct EditFileToolArgs {
+    /// The path to the file you want to edit
+    pub path: String,
+    /// The exact text to find in the file. This must match the file's contents perfectly, including all whitespace and indentation.
+    pub old_text: String,
+    /// The new text that will replace the old text.
+    pub new_text: String,
+}
+
+impl Tool for EditFileTool {
+    const NAME: &'static str = "edit_file";
+    type Error = ToolError;
+    type Args = EditFileToolArgs;
+    type Output = String;
+
+    async fn definition(&self, _prompt: String) -> ToolDefinition {
+        ToolDefinition {
+            name: Self::NAME.to_string(),
+            description: "Make a surgical edit to a file by specifying exact text to find and replace. The old_text must match exactly (including whitespace and indentation). For creating new files, use write_file instead.".to_string(),
+            parameters: to_value(schema_for!(EditFileToolArgs)).unwrap(),
+        }
+    }
+
+    async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        // Read the current contents of the file
+        let content = tokio::fs::read_to_string(&args.path)
+            .await
+            .map_err(|e| ToolError::ToolCallError(
+                format!("Failed to read file {}: {}", args.path, e).into()
+            ))?;
+
+        // Validate that the search string actually exists in the file
+        if !content.contains(&args.old_text) {
+            return Err(ToolError::ToolCallError(
+                format!(
+                    "The exact search string was not found in {}. Ensure that whitespace, indentation, and line endings match the file exactly.",
+                    args.path
+                ).into()
+            ));
+        }
+
+        // Perform the replacement
+        let new_content = content.replace(&args.old_text, &args.new_text);
+
+        // Write the modified content back to the file
+        tokio::fs::write(&args.path, new_content)
+            .await
+            .map_err(|e| ToolError::ToolCallError(
+                format!("Failed to write to file {}: {}", args.path, e).into()
+            ))?;
+
+        Ok(format!("Successfully edited {}. Replaced a block of {} characters.", args.path, args.old_text.len()))
+    }
+}
+
+pub struct SearchTool;
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct SearchToolArgs {
+    /// The string or regex pattern to search for.
+    pub pattern: String,
+    /// The directory to search in (e.g., "." for the current directory).
+    pub path: String,
+    /// Number of context lines to include before and after the match. Default is usually 2.
+    pub context_lines: Option<u32>,
+    /// Optional file glob to filter by (e.g., "*.rs" or "*.md").
+    pub file_pattern: Option<String>,
+}
+
+impl Tool for SearchTool {
+    const NAME: &'static str = "search";
+    type Error = ToolError;
+    type Args = SearchToolArgs;
+    type Output = String;
+
+    async fn definition(&self, _prompt: String) -> ToolDefinition {
+        ToolDefinition {
+            name: Self::NAME.to_string(),
+            description: "Searches for a text pattern in files using grep. Provides line numbers and context lines. Crucial for finding where functions or variables are defined and used.".to_string(),
+            parameters: to_value(schema_for!(SearchToolArgs)).unwrap(),
+        }
+    }
+
+    async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        let mut cmd = Command::new("grep");
+
+        // -r: recursive
+        // -n: print line numbers (crucial for the LLM to know where to edit)
+        // -I: ignore binary files (protects the context window)
+        // -E: extended regex
+        cmd.arg("-rnIE");
+
+        // Add context lines
+        let context = args.context_lines.unwrap_or(2);
+        cmd.arg(format!("-C{}", context));
+
+        // Filter by file pattern if provided
+        if let Some(file_pattern) = &args.file_pattern {
+            cmd.arg(format!("--include={}", file_pattern));
+        }
+
+        // The pattern and the target path
+        cmd.arg(&args.pattern);
+        cmd.arg(&args.path);
+
+        let output = cmd.output().await.map_err(|e| {
+            ToolError::ToolCallError(format!("Failed to spawn grep command: {}", e).into())
+        })?;
+
+        // grep exit codes:
+        // 0 = One or more matches found
+        // 1 = No matches found
+        // >1 = Error
+        match output.status.code() {
+            Some(0) => {
+                let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+                Ok(stdout)
+            }
+            Some(1) => Ok("No matches found.".to_string()),
+            _ => {
+                let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+                Err(ToolError::ToolCallError(format!(
+                    "Search command failed: {}",
+                    stderr.trim()
+                ).into()))
+            }
+        }
     }
 }

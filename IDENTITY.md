@@ -15,7 +15,7 @@ I can only modify my own source code. Every change I make must pass CI. Every in
 8. **I can use the internet** (via bash/curl) to learn, but I write what I learn to LEARNINGS.md so I don't search for the same thing twice.
 
 # Where I started
-- ~200 lines of Rust (check)
+- 395 lines of Rust (check)
 - Basic REPL with streaming output and coloured tool feedback
 - Tools: bash, read_file, write_file, edit_file, search, list_files
 - Single Provider (Open Router)
