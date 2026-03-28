@@ -135,18 +135,30 @@ async fn main() -> Result<(), anyhow::Error> {
         .map(|p| p.display().to_string())
         .unwrap_or_else(|_| "(unknown)".into());
 
+    // Detect git branch for display in banner
+    let git_branch = detect_git_branch().await;
+
     print_banner();
     println!("{DIM}  model: {current_model}{RESET}");
     if !skills.is_empty() {
         println!("{DIM}  skills: {} loaded{RESET}", skills.len());
     }
-    println!("{DIM}  cwd:   {cwd}{RESET}\n");
+    println!("{DIM}  cwd:   {cwd}{RESET}");
+    if let Some(branch) = &git_branch {
+        println!("{DIM}  git:   {branch}{RESET}");
+    }
+    println!();
 
     let stdin = io::stdin();
     let mut lines = stdin.lock().lines();
 
     loop {
-        print!("{BOLD}{GREEN}> {RESET}");
+        // Show branch in prompt if in a git repo
+        if let Some(ref branch) = git_branch {
+            print!("{DIM}({branch}){RESET} {BOLD}{GREEN}> {RESET}");
+        } else {
+            print!("{BOLD}{GREEN}> {RESET}");
+        }
         io::stdout().flush().ok();
 
         let line = match lines.next() {
@@ -192,6 +204,36 @@ async fn main() -> Result<(), anyhow::Error> {
     println!("\n{DIM}  bye 👋{RESET}\n");
 
     Ok(())
+}
+
+/// Detects the current git branch by running `git rev-parse --abbrev-ref HEAD`.
+/// Returns `None` if not in a git repo or git is not available.
+async fn detect_git_branch() -> Option<String> {
+    let output = tokio::process::Command::new("git")
+        .args(["rev-parse", "--abbrev-ref", "HEAD"])
+        .output()
+        .await
+        .ok()?;
+
+    if output.status.success() {
+        let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if branch.is_empty() || branch == "HEAD" {
+            // Detached HEAD — try to get a short hash instead
+            let hash_output = tokio::process::Command::new("git")
+                .args(["rev-parse", "--short", "HEAD"])
+                .output()
+                .await
+                .ok()?;
+            if hash_output.status.success() {
+                let hash = String::from_utf8_lossy(&hash_output.stdout).trim().to_string();
+                return Some(format!("detached @{hash}"));
+            }
+            return None;
+        }
+        Some(branch)
+    } else {
+        None
+    }
 }
 
 async fn run_prompt<T: CompletionModel>(agent: &mut Agent<T>, input: &str) {
