@@ -4,6 +4,7 @@
 //!   /quit, /exit    Exit the agent
 //!   /clear          Clear conversation history
 //!   /model <name>   Switch model mid-session
+//!   /help           Show available commands
 
 use rig::agent::Agent;
 use rig::client::{CompletionClient, ProviderClient};
@@ -28,6 +29,24 @@ const YELLOW: &str = "\x1b[33m";
 const CYAN: &str = "\x1b[36m";
 const RED: &str = "\x1b[31m";
 
+const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+fn print_help() {
+    println!("\n{BOLD}batstone{RESET} v{VERSION} — an evolving coding agent\n");
+    println!("{BOLD}USAGE:{RESET}");
+    println!("  batstone [OPTIONS]\n");
+    println!("{BOLD}OPTIONS:{RESET}");
+    println!("  --model <name>     Model to use (default: openai/gpt-4o)");
+    println!("  --skills <dir>     Directory containing skill definitions");
+    println!("  --version          Print version and exit");
+    println!("  --help             Print this help and exit\n");
+    println!("{BOLD}COMMANDS (in REPL):{RESET}");
+    println!("  /help              Show this help");
+    println!("  /clear             Clear conversation history");
+    println!("  /model <name>      Switch model mid-session");
+    println!("  /quit, /exit       Exit the agent\n");
+}
+
 const SYSTEM_PROMPT: &str = r#"You are a coding assistant working in the user's terminal.
 You have access to the filesystem and shell. Be direct and concise.
 When the user asks you to do something, do it — don't just explain how.
@@ -50,11 +69,23 @@ fn print_usage(usage: &Usage) {
 
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
-    // Creates OpenRouter client
-    let client = openrouter::Client::from_env();
-
     // Read environment arguments
     let args: Vec<String> = std::env::args().collect();
+
+    // Handle --help flag (check before creating client to avoid env var requirement)
+    if args.iter().any(|a| a == "--help" || a == "-h") {
+        print_help();
+        return Ok(());
+    }
+
+    // Handle --version flag
+    if args.iter().any(|a| a == "--version" || a == "-V") {
+        println!("batstone {VERSION}");
+        return Ok(());
+    }
+
+    // Creates OpenRouter client
+    let client = openrouter::Client::from_env();
 
     let model = args
         .iter()
@@ -75,20 +106,25 @@ async fn main() -> Result<(), anyhow::Error> {
 
     let full_system_prompt = format!("{}{}", SYSTEM_PROMPT, skills_prompt);
 
-    // Create agent with a single context prompt
-    let mut agent = client
-        .agent(&model)
-        .preamble(&full_system_prompt)
-        .tools(vec![
-            Box::new(ListFilesTool),
-            Box::new(ReadFileTool),
-            Box::new(WriteFileTool),
-            Box::new(BashTool),
-            Box::new(EditFileTool),
-            Box::new(SearchTool)
-        ])
-        .default_max_turns(10)
-        .build();
+    // Helper to build a fresh agent (used for initial build and /clear resets)
+    let build_agent = |model: &str| {
+        client
+            .agent(model)
+            .preamble(&full_system_prompt)
+            .tools(vec![
+                Box::new(ListFilesTool),
+                Box::new(ReadFileTool),
+                Box::new(WriteFileTool),
+                Box::new(BashTool),
+                Box::new(EditFileTool),
+                Box::new(SearchTool),
+            ])
+            .default_max_turns(10)
+            .build()
+    };
+
+    let mut current_model = model.clone();
+    let mut agent = build_agent(&current_model);
 
     // Piped mode: read all of stdin as a single prompt, run once, exit
     if !io::stdin().is_terminal() {
@@ -100,7 +136,7 @@ async fn main() -> Result<(), anyhow::Error> {
             std::process::exit(1);
         }
 
-        eprintln!("{DIM}  batstone (piped mode) — model: {model}{RESET}");
+        eprintln!("{DIM}  batstone (piped mode) — model: {current_model}{RESET}");
         run_prompt(&mut agent, input).await;
         return Ok(());
     }
@@ -110,7 +146,7 @@ async fn main() -> Result<(), anyhow::Error> {
         .unwrap_or_else(|_| "(unknown)".into());
 
     print_banner();
-    println!("{DIM}  model: {model}{RESET}");
+    println!("{DIM}  model: {current_model}{RESET}");
     if !skills.is_empty() {
         println!("{DIM}  skills: {} loaded{RESET}", skills.len());
     }
@@ -128,17 +164,48 @@ async fn main() -> Result<(), anyhow::Error> {
             _ => break,
         };
 
-        let input = line.trim();
+        let input = line.trim().to_string();
         if input.is_empty() {
             continue;
         }
 
-        match input {
-            "/quit" | "/exit" => break,
-            _ => {}
+        // Handle slash commands
+        if input.starts_with('/') {
+            let parts: Vec<&str> = input.splitn(2, ' ').collect();
+            match parts[0] {
+                "/quit" | "/exit" => break,
+                "/help" => {
+                    print_help();
+                    continue;
+                }
+                "/clear" => {
+                    agent = build_agent(&current_model);
+                    println!("{DIM}  conversation cleared{RESET}");
+                    continue;
+                }
+                "/model" => {
+                    if let Some(new_model) = parts.get(1).map(|s| s.trim()) {
+                        if new_model.is_empty() {
+                            println!("{DIM}  current model: {current_model}{RESET}");
+                        } else {
+                            current_model = new_model.to_string();
+                            agent = build_agent(&current_model);
+                            println!("{DIM}  switched to model: {current_model}{RESET}");
+                        }
+                    } else {
+                        println!("{DIM}  current model: {current_model}{RESET}");
+                    }
+                    continue;
+                }
+                _ => {
+                    println!("{YELLOW}  unknown command: {}{RESET}", parts[0]);
+                    println!("{DIM}  type /help for available commands{RESET}");
+                    continue;
+                }
+            }
         }
 
-        run_prompt(&mut agent, input).await;
+        run_prompt(&mut agent, &input).await;
     }
 
     println!("\n{DIM}  bye 👋{RESET}\n");
@@ -147,8 +214,10 @@ async fn main() -> Result<(), anyhow::Error> {
 }
 
 async fn run_prompt<T: CompletionModel>(agent: &mut Agent<T>, input: &str) {
-    let result = agent.prompt(input).await.expect("prompt failed");
-    println!("{}", result)
+    match agent.prompt(input).await {
+        Ok(result) => println!("{}", result),
+        Err(e) => eprintln!("{RED}  error: {}{RESET}", e),
+    }
 }
 
 #[derive(Debug)]
