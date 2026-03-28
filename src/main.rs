@@ -1,5 +1,7 @@
 use std::env;
 use std::fs;
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
 // ─── Data Structures ────────────────────────────────────────────────────────
 
@@ -194,28 +196,28 @@ fn fetch_issues(repo: &str, token: &Option<String>) -> Vec<Issue> {
 
 // ─── Fetch JOURNAL.md ────────────────────────────────────────────────────────
 
-fn fetch_journal(_repo: &str, _token: &Option<String>) -> String {
-    // Read from local file instead of GitHub
-    fs::read_to_string("JOURNAL.md")
-        .unwrap_or_else(|_| "_(JOURNAL.md not found)_".to_string())
-}
+// fn fetch_journal(_repo: &str, _token: &Option<String>) -> String {
+//     // Read from local file instead of GitHub
+//     fs::read_to_string("JOURNAL.md")
+//         .unwrap_or_else(|_| "_(JOURNAL.md not found)_".to_string())
+// }
 
 // ─── GitHub version (commented out for local testing) ─────────────────────────
-// fn fetch_journal_github(repo: &str, token: &Option<String>) -> String {
-//     let url = format!(
-//         "https://api.github.com/repos/{}/contents/JOURNAL.md",
-//         repo
-//     );
-//     let raw = gh_get(&url, token).unwrap_or_default();
-//
-//     // GitHub returns base64-encoded content
-//     if let Some(encoded) = json_str(&raw, "content") {
-//         let clean: String = encoded.chars().filter(|c| !c.is_whitespace()).collect();
-//         decode_base64(&clean)
-//     } else {
-//         "_(JOURNAL.md not found or inaccessible)_".to_string()
-//     }
-// }
+fn fetch_journal(repo: &str, token: &Option<String>) -> String {
+    let url = format!(
+        "https://api.github.com/repos/{}/contents/JOURNAL.md",
+        repo
+    );
+    let raw = gh_get(&url, token).unwrap_or_default();
+
+    // GitHub returns base64-encoded content
+    if let Some(encoded) = json_str(&raw, "content") {
+        let clean: String = encoded.chars().filter(|c| !c.is_whitespace()).collect();
+        decode_base64(&clean)
+    } else {
+        "_(JOURNAL.md not found or inaccessible)_".to_string()
+    }
+}
 
 fn decode_base64(s: &str) -> String {
     const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -406,6 +408,7 @@ fn generate_html(journal_entry: &str, issues: &[Issue], qr_placeholder: bool) ->
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="refresh" content="10">
 <title>BATSTONE AI — Dashboard</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=Syne:wght@400;700;800&display=swap" rel="stylesheet">
@@ -713,27 +716,47 @@ fn generate_html(journal_entry: &str, issues: &[Issue], qr_placeholder: bool) ->
 
 // ─── Entry point ─────────────────────────────────────────────────────────────
 
-fn main() {
+
+#[tokio::main]
+async fn main() {
     let repo  = "benjaminrall/bath-hack-2026";
     let token = env::var("GITHUB_TOKEN").ok();
-
-    eprintln!("🔍  Fetching JOURNAL.md …");
-    let journal_raw   = fetch_journal(repo, &token);
-    let journal_entry = latest_journal_entry(&journal_raw);
-
-    eprintln!("🔍  Fetching issues …");
-    let issues = fetch_issues(repo, &token);
-    eprintln!("    {} issues found", issues.len());
-
-    let html = generate_html(&journal_entry, &issues, true);
-
     let out = "dashboard.html";
-    fs::write(out, &html).expect("Failed to write dashboard.html");
-    eprintln!("✅  Written to {}", out);
 
-    // Optionally open in browser (macOS / Linux)
-    #[cfg(target_os = "macos")]
-    let _ = std::process::Command::new("open").arg(out).spawn();
-    #[cfg(target_os = "linux")]
-    let _ = std::process::Command::new("xdg-open").arg(out).spawn();
+
+    // Initial generation
+    {
+        let journal_raw   = fetch_journal(repo, &token);
+        let journal_entry = latest_journal_entry(&journal_raw);
+        let issues = fetch_issues(repo, &token);
+        let html = generate_html(&journal_entry, &issues, true);
+        fs::write(out, &html).expect("Failed to write dashboard.html");
+        eprintln!("✅  Written to {}", out);
+    }
+
+    // Spawn a background task to refresh from GitHub every 30 seconds
+    let repo = repo.to_string();
+    tokio::spawn(async move {
+        loop {
+            let token = env::var("GITHUB_TOKEN").ok();
+            let journal_raw   = fetch_journal(&repo, &token);
+            let journal_entry = latest_journal_entry(&journal_raw);
+            let issues = fetch_issues(&repo, &token);
+            let html = generate_html(&journal_entry, &issues, true);
+            if let Err(e) = fs::write("dashboard.html", &html) {
+                eprintln!("[periodic] Failed to write dashboard.html: {}", e);
+            } else {
+                eprintln!("[periodic] Refreshed dashboard.html from GitHub");
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+        }
+    });
+
+    // Serve dashboard.html using warp
+    use warp::Filter;
+    let dashboard = warp::fs::file(out);
+    eprintln!("🌐  Serving at http://localhost:8080/ (or your local IP)\n");
+    warp::serve(dashboard)
+        .run(([0, 0, 0, 0], 8080))
+        .await;
 }
