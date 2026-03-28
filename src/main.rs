@@ -160,39 +160,30 @@ async fn main() -> Result<(), anyhow::Error> {
         }
 
         // Handle slash commands
-        if input.starts_with('/') {
-            let parts: Vec<&str> = input.splitn(2, ' ').collect();
-            match parts[0] {
-                "/quit" | "/exit" => break,
-                "/help" => {
+        if let Some(cmd) = parse_command(&input) {
+            match cmd {
+                ReplCommand::Quit => break,
+                ReplCommand::Help => {
                     print_help();
-                    continue;
                 }
-                "/clear" => {
+                ReplCommand::Clear => {
                     agent = build_agent(&current_model);
                     println!("{DIM}  conversation cleared{RESET}");
-                    continue;
                 }
-                "/model" => {
-                    if let Some(new_model) = parts.get(1).map(|s| s.trim()) {
-                        if new_model.is_empty() {
-                            println!("{DIM}  current model: {current_model}{RESET}");
-                        } else {
-                            current_model = new_model.to_string();
-                            agent = build_agent(&current_model);
-                            println!("{DIM}  switched to model: {current_model}{RESET}");
-                        }
-                    } else {
-                        println!("{DIM}  current model: {current_model}{RESET}");
-                    }
-                    continue;
+                ReplCommand::Model(None) => {
+                    println!("{DIM}  current model: {current_model}{RESET}");
                 }
-                _ => {
-                    println!("{YELLOW}  unknown command: {}{RESET}", parts[0]);
+                ReplCommand::Model(Some(new_model)) => {
+                    current_model = new_model.to_string();
+                    agent = build_agent(&current_model);
+                    println!("{DIM}  switched to model: {current_model}{RESET}");
+                }
+                ReplCommand::Unknown(name) => {
+                    println!("{YELLOW}  unknown command: {name}{RESET}");
                     println!("{DIM}  type /help for available commands{RESET}");
-                    continue;
                 }
             }
+            continue;
         }
 
         run_prompt(&mut agent, &input).await;
@@ -626,9 +617,48 @@ fn truncate(s: &str, max: usize) -> &str {
     }
 }
 
+/// Represents a parsed REPL slash command.
+#[derive(Debug, PartialEq)]
+enum ReplCommand<'a> {
+    Quit,
+    Help,
+    Clear,
+    /// /model with an optional argument. None means "show current model".
+    Model(Option<&'a str>),
+    Unknown(&'a str),
+}
+
+/// Parses a slash-command line (e.g. "/model gpt-4o") into a `ReplCommand`.
+/// Returns `None` if the input is not a slash command.
+fn parse_command(input: &str) -> Option<ReplCommand<'_>> {
+    if !input.starts_with('/') {
+        return None;
+    }
+    let (cmd, rest) = match input.find(' ') {
+        Some(pos) => (&input[..pos], input[pos + 1..].trim()),
+        None => (input, ""),
+    };
+    let parsed = match cmd {
+        "/quit" | "/exit" => ReplCommand::Quit,
+        "/help" => ReplCommand::Help,
+        "/clear" => ReplCommand::Clear,
+        "/model" => {
+            if rest.is_empty() {
+                ReplCommand::Model(None)
+            } else {
+                ReplCommand::Model(Some(rest))
+            }
+        }
+        other => ReplCommand::Unknown(other),
+    };
+    Some(parsed)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // --- truncate tests ---
 
     #[test]
     fn test_truncate_short_string() {
@@ -653,5 +683,95 @@ mod tests {
     #[test]
     fn test_truncate_empty() {
         assert_eq!(truncate("", 5), "");
+    }
+
+    // --- parse_command tests ---
+
+    #[test]
+    fn test_parse_command_not_a_command() {
+        assert_eq!(parse_command("hello world"), None);
+        assert_eq!(parse_command(""), None);
+        assert_eq!(parse_command("  /quit"), None); // leading space — not a command
+    }
+
+    #[test]
+    fn test_parse_command_quit() {
+        assert_eq!(parse_command("/quit"), Some(ReplCommand::Quit));
+        assert_eq!(parse_command("/exit"), Some(ReplCommand::Quit));
+    }
+
+    #[test]
+    fn test_parse_command_help() {
+        assert_eq!(parse_command("/help"), Some(ReplCommand::Help));
+    }
+
+    #[test]
+    fn test_parse_command_clear() {
+        assert_eq!(parse_command("/clear"), Some(ReplCommand::Clear));
+    }
+
+    #[test]
+    fn test_parse_command_model_no_arg() {
+        assert_eq!(parse_command("/model"), Some(ReplCommand::Model(None)));
+    }
+
+    #[test]
+    fn test_parse_command_model_with_arg() {
+        assert_eq!(
+            parse_command("/model openai/gpt-4o"),
+            Some(ReplCommand::Model(Some("openai/gpt-4o")))
+        );
+    }
+
+    #[test]
+    fn test_parse_command_model_trims_spaces() {
+        assert_eq!(
+            parse_command("/model   anthropic/claude-3-5-sonnet"),
+            Some(ReplCommand::Model(Some("anthropic/claude-3-5-sonnet")))
+        );
+    }
+
+    #[test]
+    fn test_parse_command_unknown() {
+        assert_eq!(
+            parse_command("/foobar"),
+            Some(ReplCommand::Unknown("/foobar"))
+        );
+    }
+
+    // --- format_skills_xml tests ---
+
+    #[test]
+    fn test_format_skills_xml_empty() {
+        assert_eq!(format_skills_xml(&[]), "");
+    }
+
+    #[test]
+    fn test_format_skills_xml_single_skill() {
+        let skills = vec![Skill {
+            name: "test-skill".to_string(),
+            description: "A test skill".to_string(),
+            location: "./skills/test/SKILL.md".to_string(),
+            tools: vec!["bash".to_string(), "read_file".to_string()],
+        }];
+        let xml = format_skills_xml(&skills);
+        assert!(xml.contains("<available_skills>"));
+        assert!(xml.contains("</available_skills>"));
+        assert!(xml.contains("<name>test-skill</name>"));
+        assert!(xml.contains("<description>A test skill</description>"));
+        assert!(xml.contains("<tools>bash, read_file</tools>"));
+    }
+
+    #[test]
+    fn test_format_skills_xml_no_tools() {
+        let skills = vec![Skill {
+            name: "minimal".to_string(),
+            description: "No tools".to_string(),
+            location: "./SKILL.md".to_string(),
+            tools: vec![],
+        }];
+        let xml = format_skills_xml(&skills);
+        // Should not emit an empty <tools> tag
+        assert!(!xml.contains("<tools>"));
     }
 }
