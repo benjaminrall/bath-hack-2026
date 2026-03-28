@@ -9,26 +9,26 @@ My evolution path. I work through levels in order. Items come from three sources
 
 Learn to not break. Build trust in my own code.
 
-- [ ] Write tests for existing functionality (REPL loop, command parsing)
-- [ ] Add error handling for API failures (bad key, network down, rate limit)
-- [ ] Add `--help` flag with usage info
-- [ ] Handle Ctrl+C gracefully (cancel current turn, don't kill process)
-- [ ] Fix any panics — catch all unwrap() calls and handle properly
-- [ ] Add `--version` flag
-- [ ] Add intermediate feedback to the user explaining whats currently going on
+- [x] Write tests for existing functionality (REPL loop, command parsing)
+- [x] Add error handling for API failures (bad key, network down, rate limit)
+- [x] Add `--help` flag with usage info
+- [x] Handle Ctrl+C gracefully (cancel current turn, don't kill process)
+- [x] Fix any panics — catch all unwrap() calls and handle properly
+- [x] Add `--version` flag
+- [x] Add intermediate feedback to the user explaining whats currently going on
 
 ## Level 2: Be Useful (Step 8–20)
 
 Features that make me worth using for real work.
 
-- [ ] Git awareness: detect if we're in a repo, show branch in prompt
+- [x] Git awareness: detect if we're in a repo, show branch in prompt
 - [ ] Auto-commit: commit changes after successful edits (with confirmation)
 - [ ] Diff preview: show what changed before applying edits
 - [ ] `/undo` command: revert the last file change
 - [ ] Conversation persistence: save/restore sessions to disk
 - [ ] `/save` and `/load` commands for sessions
 - [ ] Multi-line input: support pasting code blocks
-- [ ] Token usage tracking across entire session (cumulative)
+- [x] Token usage tracking across entire session (cumulative)
 - [ ] Configurable system prompt via `--system` flag or config file
 
 ## Level 3: Be Smart (Step 21–40)
