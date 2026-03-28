@@ -8,7 +8,7 @@ RUN apt-get update && \
 
 ENV GIT_AUTHOR_NAME="Batstone Agent"
 ENV GIT_AUTHOR_EMAIL="batstone@localhost"
-ENV GIT_COMMITTER_NAME="Benjamin Rall"
-ENV GIT_COMMITTER_EMAIL="benr2508@aol.com"
+ENV GIT_COMMITTER_NAME="Batstone Agent"
+ENV GIT_COMMITTER_EMAIL="batstone@localhost"
 
 WORKDIR /workspace
