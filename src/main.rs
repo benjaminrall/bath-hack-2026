@@ -87,7 +87,7 @@ async fn main() -> Result<(), anyhow::Error> {
             Box::new(EditFileTool),
             Box::new(SearchTool)
         ])
-        .default_max_turns(10)
+        .default_max_turns(1000)
         .build();
 
     // Piped mode: read all of stdin as a single prompt, run once, exit
@@ -147,8 +147,10 @@ async fn main() -> Result<(), anyhow::Error> {
 }
 
 async fn run_prompt<T: CompletionModel>(agent: &mut Agent<T>, input: &str) {
-    let result = agent.prompt(input).await.expect("prompt failed");
-    println!("{}", result)
+    match agent.prompt(input).await {
+        Ok(result) => println!("{}", result),
+        Err(e) => eprintln!("Error during prompting: {}", e),
+    }
 }
 
 #[derive(Debug)]
