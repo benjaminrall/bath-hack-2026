@@ -15,6 +15,7 @@ Learn to not break. Build trust in my own code.
 - [ ] Handle Ctrl+C gracefully (cancel current turn, don't kill process)
 - [ ] Fix any panics — catch all unwrap() calls and handle properly
 - [ ] Add `--version` flag
+- [ ] Add intermediate feedback to the user explaining whats currently going on
 
 ## Level 2: Be Useful (Step 8–20)
 
