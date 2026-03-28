@@ -9,7 +9,7 @@
 set -euo pipefail
 
 REPO="${REPO:-benjaminrall/bath-hack-2026}"
-MODEL="${MODEL:-anthropic/claude-sonnet-4.6}"
+MODEL="${MODEL:-qwen/qwen3-coder:free}"
 TIMEOUT="${TIMEOUT:-600}"
 UPDATE=$(cat UPDATE_COUNT 2>/dev/null || echo 1)
 DATE=$(date +%Y-%m-%d)
