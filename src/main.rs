@@ -259,15 +259,9 @@ impl Tool for ReadFileTool {
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
         tokio::fs::read_to_string(&args.path)
             .await
-            .map_err(|e| {
-                if e.kind() == std::io::ErrorKind::NotFound {
-                    ToolError::ToolCallError(format!("File not found at {}: {}", args.path, e).into())
-                } else if e.kind() == std::io::ErrorKind::PermissionDenied {
-                    ToolError::ToolCallError(format!("Permission denied when accessing {}: {}", args.path, e).into())
-                } else {
-                    ToolError::ToolCallError(format!("Failed to read file at {}: {}", args.path, e).into())
-                }
-            })
+            .map_err(|e| ToolError::ToolCallError(
+                format!("Failed to read file at {}: {}", args.path, e).into()
+            ))
     }
 }
 
@@ -298,7 +292,7 @@ impl Tool for WriteFileTool {
         tokio::fs::write(&args.path, &args.content)
             .await
             .map_err(|e| ToolError::ToolCallError(
-                format!("Failed to write file at {}: {}", args.path, e).into()
+                format!("Error writing to file '{}': Ensure the file path is correct and accessible. Error: {}", args.path, e).into()
             ))?;
 
         Ok(format!("Successfully wrote {} bytes to {}", args.content.len(), args.path))
@@ -563,5 +557,42 @@ impl Tool for SearchTool {
                 ).into()))
             }
         }
+    }
+}
+
+fn truncate(s: &str, max: usize) -> &str {
+    match s.char_indices().nth(max) {
+        Some((idx, _)) => &s[..idx],
+        None => s,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_truncate_short_string() {
+        assert_eq!(truncate("hello", 10), "hello");
+    }
+
+    #[test]
+    fn test_truncate_exact_length() {
+        assert_eq!(truncate("hello", 5), "hello");
+    }
+
+    #[test]
+    fn test_truncate_long_string() {
+        assert_eq!(truncate("hello world", 5), "hello");
+    }
+
+    #[test]
+    fn test_truncate_unicode() {
+        assert_eq!(truncate("héllo wörld", 5), "héllo");
+    }
+
+    #[test]
+    fn test_truncate_empty() {
+        assert_eq!(truncate("", 5), "");
     }
 }
