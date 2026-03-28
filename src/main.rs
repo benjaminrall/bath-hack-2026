@@ -283,7 +283,7 @@ impl Tool for WriteFileTool {
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
             name: Self::NAME.to_string(),
-            description: "Writes content to a file, creating it if it doesn't exist or overwriting it if it does.".to_string(),
+            description: "Writes content to a file, creating it if it doesn't exist or overwriting the entire file contents it if it does.".to_string(),
             parameters: to_value(schema_for!(WriteFileToolArgs)).unwrap(),
         }
     }
