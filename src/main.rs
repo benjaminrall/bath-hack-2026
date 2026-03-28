@@ -169,6 +169,10 @@ impl Tool for ReadFileTool {
 struct BashTool;
 
 #[derive(Serialize, Deserialize, JsonSchema)]
+/// Arguments to parse to the `BashTool`
+///
+/// * `command`: The command to run
+/// * `cwd`: Working directory to run the command from (defaults to current directiry)
 struct BashToolArgs {
     pub command: String,
     pub cwd: Option<String>,
