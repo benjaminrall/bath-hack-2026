@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BATSTONE AI — Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=Syne:wght@400;700;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:        #0a0a0f;
+    --surface:   #111118;
+    --border:    #1e1e2e;
+    --accent:    #7cffd4;
+    --accent2:   #ff6b6b;
+    --text:      #e8e8f0;
+    --muted:     #666680;
+    --radius:    12px;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Space Mono', monospace;
+    font-size: 14px;
+    line-height: 1.7;
+    min-height: 100vh;
+    padding: 24px;
+  }
+
+  /* ── Scanline grain overlay ── */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0,0,0,.08) 2px,
+      rgba(0,0,0,.08) 4px
+    );
+    pointer-events: none;
+    z-index: 9999;
+  }
+
+  /* ── Layout ── */
+  .grid {
+    display: grid;
+    grid-template-columns: 180px 1fr;
+    grid-template-rows: auto auto;
+    gap: 16px;
+    max-width: 1100px;
+    margin: 0 auto;
+  }
+
+  /* ── Header row ── */
+  .qr-cell {
+    grid-column: 1;
+    grid-row: 1;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    min-height: 180px;
+  }
+
+  .qr-placeholder {
+    width: 140px;
+    height: 140px;
+    border: 2px dashed var(--muted);
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--muted);
+    font-size: 12px;
+    letter-spacing: 1px;
+  }
+
+  #qr-img { width: 140px; height: 140px; object-fit: contain; border-radius: 8px; }
+
+  .title-cell {
+    grid-column: 2;
+    grid-row: 1;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: 28px 36px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .title-cell::after {
+    content: '';
+    position: absolute;
+    top: -40%;
+    right: -10%;
+    width: 300px;
+    height: 300px;
+    background: radial-gradient(circle, rgba(124,255,212,.07) 0%, transparent 70%);
+    pointer-events: none;
+  }
+
+  .title-cell h1 {
+    font-family: 'Syne', sans-serif;
+    font-weight: 800;
+    font-size: clamp(28px, 4vw, 48px);
+    letter-spacing: -1px;
+    color: var(--accent);
+    line-height: 1;
+  }
+
+  .title-cell .subtitle {
+    color: var(--muted);
+    font-size: 11px;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    margin-top: 8px;
+  }
+
+  /* ── Journal ── */
+  .journal-cell {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 28px 32px;
+  }
+
+  .section-label {
+    font-size: 10px;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 14px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .section-label::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+  }
+
+  .journal-cell h1, .journal-cell h2 {
+    font-family: 'Syne', sans-serif;
+    font-weight: 700;
+    color: var(--accent);
+    margin-bottom: 8px;
+    margin-top: 16px;
+  }
+  .journal-cell h3 { color: var(--text); margin: 12px 0 6px; }
+  .journal-cell p  { color: #b0b0c8; margin-bottom: 6px; }
+  .journal-cell ul { padding-left: 20px; color: #b0b0c8; margin-bottom: 8px; }
+  .journal-cell li { margin-bottom: 2px; }
+  .journal-cell code {
+    background: #1a1a2e;
+    padding: 1px 5px;
+    border-radius: 4px;
+    font-size: 12px;
+    color: var(--accent2);
+  }
+  .journal-cell pre {
+    background: #0d0d1a;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px;
+    overflow-x: auto;
+    margin: 10px 0;
+  }
+  .journal-cell pre code { background: none; padding: 0; color: var(--text); }
+
+  /* ── Issues ── */
+  .issues-cell {
+    grid-column: 1 / -1;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 28px 32px;
+  }
+
+  .issues-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 12px;
+    margin-top: 4px;
+  }
+
+  .issue-card {
+    display: block;
+    background: #0d0d18;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+    text-decoration: none;
+    color: var(--text);
+    transition: border-color .2s, transform .15s;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .issue-card:hover {
+    border-color: var(--accent);
+    transform: translateY(-2px);
+  }
+
+  .issue-card:hover::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(135deg, rgba(124,255,212,.04), transparent);
+    pointer-events: none;
+  }
+
+  .issue-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+  }
+
+  .issue-num { color: var(--muted); font-size: 11px; }
+
+  .thumbs {
+    font-size: 11px;
+    background: rgba(124,255,212,.1);
+    color: var(--accent);
+    padding: 2px 8px;
+    border-radius: 20px;
+  }
+
+  .issue-title {
+    font-family: 'Syne', sans-serif;
+    font-weight: 700;
+    font-size: 13px;
+    margin-bottom: 6px;
+    color: var(--text);
+  }
+
+  .snippet { font-size: 11px; color: var(--muted); margin-bottom: 8px; }
+
+  .issue-meta { display: flex; flex-wrap: wrap; gap: 4px; }
+
+  .label {
+    font-size: 10px;
+    padding: 2px 7px;
+    border-radius: 20px;
+    background: rgba(255,107,107,.12);
+    color: var(--accent2);
+    letter-spacing: .5px;
+  }
+
+  .empty { color: var(--muted); font-style: italic; }
+
+  /* ── Responsive ── */
+  @media (max-width: 600px) {
+    .grid { grid-template-columns: 1fr; }
+    .qr-cell { min-height: 120px; }
+  }
+</style>
+</head>
+<body>
+<div class="grid">
+
+  <!-- QR + Title -->
+  <div class="qr-cell">
+    <div class="qr-placeholder"><span>QR Code</span></div>
+  </div>
+
+  <div class="title-cell">
+    <h1>BATSTONE AI</h1>
+    <p class="subtitle">Bath Hack 2026 · Live Dashboard</p>
+  </div>
+
+  <!-- Journal -->
+  <div class="journal-cell">
+    <div class="section-label">Latest Journal Entry</div>
+    <h2>Update 1 - Test</h2>
+<br>
+<p>This is a test of my second journal entry</p>
+
+  </div>
+
+  <!-- Issues -->
+  <div class="issues-cell">
+    <div class="section-label">Open Issues · sorted by 👍</div>
+    <div class="issues-grid">
+      <a class="issue-card" href="https://github.com/benjaminrall/bath-hack-2026/issues/1" target="_blank">
+  <div class="issue-header">
+    <span class="issue-num">#1</span>
+    <span class="thumbs">👍 1</span>
+  </div>
+  <h3 class="issue-title">test</h3>
+  <p class="snippet">jklsdjflk;sdjf</p>
+  <div class="issue-meta"><span class="label">bug</span></div>
+</a><a class="issue-card" href="https://github.com/benjaminrall/bath-hack-2026/issues/2" target="_blank">
+  <div class="issue-header">
+    <span class="issue-num">#2</span>
+    
+  </div>
+  <h3 class="issue-title">test 2</h3>
+  <p class="snippet">fdsfdsfsd</p>
+  <div class="issue-meta"></div>
+</a>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>
