@@ -302,6 +302,10 @@ impl Tool for WriteFileTool {
 struct BashTool;
 
 #[derive(Serialize, Deserialize, JsonSchema)]
+/// Arguments to parse to the `BashTool`
+///
+/// * `command`: The command to run
+/// * `cwd`: Working directory to run the command from (defaults to current directiry)
 struct BashToolArgs {
     /// Command to run
     pub command: String,
