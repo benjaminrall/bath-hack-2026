@@ -53,13 +53,13 @@ timeout "$TIMEOUT" cargo run -- \
     --model "$MODEL" \
     --skills ./skills \
     <<PROMPT || true
-Today is Day $DAY ($DATE).
+Today is Day $UPDATE ($DATE).
 
 Read these files in this order:
 1. IDENTITY.md (who you are and your rules)
 2. src/main.rs (your current source code — this is YOU)
 3. JOURNAL.md (your recent history — last 10 entries)
-4. ISSUES_TODAY.md (community requests)
+4. ISSUES_TODAY.json (community requests)
 
 === PHASE 1: Self-Assessment ===
 
@@ -69,7 +69,7 @@ Note any friction, bugs, crashes, or missing capabilities.
 
 === PHASE 2: Review Community Issues ===
 
-Read ISSUES_TODAY.md. These are real people asking you to improve.
+Read ISSUES_TODAY.json. These are real people asking you to improve.
 Issues with more 👍 reactions should be prioritized higher.
 
 === PHASE 3: Decide ===
@@ -87,13 +87,13 @@ For each improvement, follow the evolve skill rules:
 - Use edit_file for surgical changes
 - Run cargo build && cargo test after changes
 - If build fails, try to fix it. If you can't, revert with: bash git checkout -- src/
-- After each successful change, commit: git add -A && git commit -m "Day $DAY: <short description>"
+- After each successful change, commit: git add -A && git commit -m "Update $UPDATE: <short description>"
 - Then move on to the next improvement
 
 === PHASE 5: Journal ===
 
 Write today's entry at the TOP of JOURNAL.md. Format:
-## Day $DAY — [title]
+## Day $UPDATE — [title]
 [2-4 sentences: what you tried, what worked, what didn't, what's next]
 
 === PHASE 6: Issue Response ===
@@ -166,4 +166,4 @@ echo "→ Pushing..."
 git push || echo "  Push failed (maybe no remote or auth issue)"
 
 echo ""
-echo "=== Day $DAY complete ==="
+echo "=== Day $UPDATE complete ==="
