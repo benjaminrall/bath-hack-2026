@@ -1,22 +1,134 @@
+mod test;
+
+use std::io;
+use std::io::{BufRead, IsTerminal, Read, Write};
+use rig::agent::Agent;
 use rig::client::{CompletionClient, ProviderClient};
-use rig::completion::Prompt;
-use rig::providers::openai;
+use rig::completion::{CompletionModel, Prompt, Usage};
+use rig::providers::openrouter;
+
+const RESET: &str = "\x1b[0m";
+const BOLD: &str = "\x1b[1m";
+const DIM: &str = "\x1b[2m";
+const GREEN: &str = "\x1b[32m";
+const YELLOW: &str = "\x1b[33m";
+const CYAN: &str = "\x1b[36m";
+const RED: &str = "\x1b[31m";
+
+const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+const SYSTEM_PROMPT: &str = r#"You are a coding assistant working in the user's terminal.
+You have access to the filesystem and shell. Be direct and concise.
+When the user asks you to do something, do it — don't just explain how.
+Use tools proactively: read files to understand context, run commands to verify your work.
+After making changes, run tests or verify the result when appropriate."#;
+
+fn print_banner() {
+    println!(
+        "\n{BOLD}{CYAN}  batstone{RESET} v{VERSION} {DIM}— our evolving coding agent{RESET}"
+    );
+    println!("{DIM}  Type /quit to exit, /clear to reset{RESET}\n");
+}
+
+fn print_usage(usage: &Usage) {
+    if usage.input_tokens > 0 || usage.output_tokens > 0 {
+        println!(
+            "\n{DIM}  tokens: {} in / {} out{RESET}",
+            usage.input_tokens, usage.output_tokens
+        );
+    }
+}
 
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
-    // Create OpenAI client
-    let client = openai::Client::from_env();
+
+    // Create OpenRouter client
+    let client = openrouter::Client::from_env();
+
+    let args: Vec<String> = std::env::args().collect();
+
+    let model = args
+        .iter()
+        .position(|a| a == "--model")
+        .and_then(|i| args.get(i + 1))
+        .cloned()
+        .unwrap_or_else(|| "openai/gpt-4o".into());
+
+    let skill_dirs: Vec<String> = args
+        .iter()
+        .enumerate()
+        .filter(|(_, a)| a.as_str() == "--skills")
+        .filter_map(|(i, _)| args.get(i + 1).cloned())
+        .collect();
 
     // Create agent with a single context prompt
-    let comedian_agent = client
-        .agent("gpt-5.2")
-        .preamble("You are a comedian here to entertain the user using humour and jokes.")
+    let mut agent = client
+        .agent(&model)
+        .preamble(SYSTEM_PROMPT)
         .build();
 
-    // Prompt the agent and print the response
-    let response = comedian_agent.prompt("Entertain me!").await?;
+    // Piped mode: read all of stdin as a single prompt, run once, exit
+    if !io::stdin().is_terminal() {
+        let mut input = String::new();
+        io::stdin().read_to_string(&mut input).ok();
+        let input = input.trim();
+        if input.is_empty() {
+            eprintln!("No input on stdin.");
+            std::process::exit(1);
+        }
 
-    println!("{response}");
+        eprintln!("{DIM}  yoyo (piped mode) — model: {model}{RESET}");
+        run_prompt(&mut agent, input).await;
+        return Ok(());
+    }
+
+    let cwd = std::env::current_dir()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|_| "(unknown)".into());
+
+    print_banner();
+    println!("{DIM}  model: {model}{RESET}");
+    // if !skills.is_empty() {
+    //     println!("{DIM}  skills: {} loaded{RESET}", skills.len());
+    // }
+    println!("{DIM}  cwd:   {cwd}{RESET}\n");
+
+    let stdin = io::stdin();
+    let mut lines = stdin.lock().lines();
+
+    loop {
+        print!("{BOLD}{GREEN}> {RESET}");
+        io::stdout().flush().ok();
+
+        let line = match lines.next() {
+            Some(Ok(l)) => l,
+            _ => break,
+        };
+
+        let input = line.trim();
+        if input.is_empty() {
+            continue;
+        }
+
+        match input {
+            "/quit" | "/exit" => break,
+            _ => {}
+        }
+
+        run_prompt(&mut agent, input).await;
+    }
+
+    println!("\n{DIM}  bye 👋{RESET}\n");
 
     Ok(())
+}
+
+async fn run_prompt<T: CompletionModel>(agent: &mut Agent<T>, input: &str) {
+    let result = agent.prompt(input).await.expect("prompt failed");
+    println!("{}", result)
+}
+
+/// AgentSkills open standard skill set
+struct SkillSet {
+
 }
