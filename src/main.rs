@@ -35,8 +35,9 @@ Use tools proactively: read files to understand context, run commands to verify 
 After making changes, run tests or verify the result when appropriate."#;
 
 fn print_banner() {
-    println!("\n{BOLD}{CYAN}  batstone{RESET} {DIM}— our evolving coding agent{RESET}");
-    println!("{DIM}  Type /quit to exit, /clear to reset{RESET}\n");
+    println!("\n{BOLD}{CYAN}batstone{RESET} {DIM}— our evolving coding agent{RESET}");
+    println!("{DIM}Type '{BOLD}/quit{RESET}{DIM}' to exit, '{BOLD}/clear{RESET}{DIM}' to reset the session{RESET}\n");
+    println!("{BOLD}{YELLOW}Helpful Tips:{RESET} Follow prompts carefully. Unexpected errors may occur if inputs are malformed.");
 }
 
 fn print_usage(usage: &Usage) {
