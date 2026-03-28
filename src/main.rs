@@ -1,12 +1,23 @@
-mod test;
+//! batstone - a coding agent that evolves itself
+//!
+//! Commands:
+//!   /quit, /exit    Exit the agent
+//!   /clear          Clear conversation history
+//!   /model <name>   Switch model mid-session
 
+use schemars::{schema_for, JsonSchema};
 use std::io;
 use std::io::{BufRead, IsTerminal, Read, Write};
 use rig::agent::Agent;
 use rig::client::{CompletionClient, ProviderClient};
-use rig::completion::{CompletionModel, Prompt, Usage};
+use rig::completion::{CompletionModel, Prompt, ToolDefinition, Usage};
 use rig::providers::openrouter;
+use rig::tool::{Tool, ToolError};
+use rig::wasm_compat::{WasmCompatSend, WasmCompatSync};
+use serde::{Deserialize, Serialize};
+use serde_json::to_value;
 
+// ANSI colour helpers
 const RESET: &str = "\x1b[0m";
 const BOLD: &str = "\x1b[1m";
 const DIM: &str = "\x1b[2m";
@@ -14,8 +25,6 @@ const GREEN: &str = "\x1b[32m";
 const YELLOW: &str = "\x1b[33m";
 const CYAN: &str = "\x1b[36m";
 const RED: &str = "\x1b[31m";
-
-const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 const SYSTEM_PROMPT: &str = r#"You are a coding assistant working in the user's terminal.
 You have access to the filesystem and shell. Be direct and concise.
@@ -25,7 +34,7 @@ After making changes, run tests or verify the result when appropriate."#;
 
 fn print_banner() {
     println!(
-        "\n{BOLD}{CYAN}  batstone{RESET} v{VERSION} {DIM}— our evolving coding agent{RESET}"
+        "\n{BOLD}{CYAN}  batstone{RESET} {DIM}— our evolving coding agent{RESET}"
     );
     println!("{DIM}  Type /quit to exit, /clear to reset{RESET}\n");
 }
@@ -41,10 +50,10 @@ fn print_usage(usage: &Usage) {
 
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
-
-    // Create OpenRouter client
+    // Creates OpenRouter client
     let client = openrouter::Client::from_env();
 
+    // Read environment arguments
     let args: Vec<String> = std::env::args().collect();
 
     let model = args
@@ -60,6 +69,8 @@ async fn main() -> Result<(), anyhow::Error> {
         .filter(|(_, a)| a.as_str() == "--skills")
         .filter_map(|(i, _)| args.get(i + 1).cloned())
         .collect();
+
+    let skills = skill_dirs;
 
     // Create agent with a single context prompt
     let mut agent = client
@@ -77,7 +88,7 @@ async fn main() -> Result<(), anyhow::Error> {
             std::process::exit(1);
         }
 
-        eprintln!("{DIM}  yoyo (piped mode) — model: {model}{RESET}");
+        eprintln!("{DIM}  batstone (piped mode) — model: {model}{RESET}");
         run_prompt(&mut agent, input).await;
         return Ok(());
     }
@@ -88,9 +99,9 @@ async fn main() -> Result<(), anyhow::Error> {
 
     print_banner();
     println!("{DIM}  model: {model}{RESET}");
-    // if !skills.is_empty() {
-    //     println!("{DIM}  skills: {} loaded{RESET}", skills.len());
-    // }
+    if !skills.is_empty() {
+        println!("{DIM}  skills: {} loaded{RESET}", skills.len());
+    }
     println!("{DIM}  cwd:   {cwd}{RESET}\n");
 
     let stdin = io::stdin();
@@ -131,4 +142,29 @@ async fn run_prompt<T: CompletionModel>(agent: &mut Agent<T>, input: &str) {
 /// AgentSkills open standard skill set
 struct SkillSet {
 
+}
+
+struct ReadFileTool;
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+struct ReadFileToolArgs {
+    pub path: String,
+}
+impl Tool for ReadFileTool {
+    const NAME: &'static str = "read_file";
+    type Error = ToolError;
+    type Args = ReadFileToolArgs;
+    type Output = String;
+
+    async fn definition(&self, _prompt: String) -> ToolDefinition {
+        ToolDefinition {
+            name: Self::NAME.to_string(),
+            description: "Reads the contents of a file".to_string(),
+            parameters: to_value(schema_for!(ReadFileToolArgs)).unwrap(),
+        }
+    }
+
+    async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        todo!()
+    }
 }
