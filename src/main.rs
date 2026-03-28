@@ -5,17 +5,17 @@
 //!   /clear          Clear conversation history
 //!   /model <name>   Switch model mid-session
 
-use schemars::{schema_for, JsonSchema};
-use std::io;
-use std::io::{BufRead, IsTerminal, Read, Write};
 use rig::agent::Agent;
 use rig::client::{CompletionClient, ProviderClient};
 use rig::completion::{CompletionModel, Prompt, ToolDefinition, Usage};
 use rig::providers::openrouter;
 use rig::tool::{Tool, ToolError};
 use rig::wasm_compat::{WasmCompatSend, WasmCompatSync};
+use schemars::{JsonSchema, schema_for};
 use serde::{Deserialize, Serialize};
 use serde_json::to_value;
+use std::io;
+use std::io::{BufRead, IsTerminal, Read, Write};
 
 // ANSI colour helpers
 const RESET: &str = "\x1b[0m";
@@ -33,9 +33,7 @@ Use tools proactively: read files to understand context, run commands to verify 
 After making changes, run tests or verify the result when appropriate."#;
 
 fn print_banner() {
-    println!(
-        "\n{BOLD}{CYAN}  batstone{RESET} {DIM}— our evolving coding agent{RESET}"
-    );
+    println!("\n{BOLD}{CYAN}  batstone{RESET} {DIM}— our evolving coding agent{RESET}");
     println!("{DIM}  Type /quit to exit, /clear to reset{RESET}\n");
 }
 
@@ -75,6 +73,7 @@ async fn main() -> Result<(), anyhow::Error> {
     // Create agent with a single context prompt
     let mut agent = client
         .agent(&model)
+        .tool(BashTool)
         .preamble(SYSTEM_PROMPT)
         .build();
 
@@ -140,9 +139,7 @@ async fn run_prompt<T: CompletionModel>(agent: &mut Agent<T>, input: &str) {
 }
 
 /// AgentSkills open standard skill set
-struct SkillSet {
-
-}
+struct SkillSet {}
 
 struct ReadFileTool;
 
@@ -166,5 +163,61 @@ impl Tool for ReadFileTool {
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
         todo!()
+    }
+}
+
+struct BashTool;
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+struct BashToolArgs {
+    pub command: String,
+    pub cwd: Option<String>,
+}
+
+impl Tool for BashTool {
+    const NAME: &'static str = "bash";
+    type Error = ToolError;
+    type Args = BashToolArgs;
+    type Output = String;
+
+    async fn definition(&self, _prompt: String) -> ToolDefinition {
+        ToolDefinition {
+            name: Self::NAME.to_string(),
+            description: "Runs a bash command and returns its stdout and stderr".to_string(),
+            parameters: to_value(schema_for!(BashToolArgs)).unwrap(),
+        }
+    }
+
+    async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        let mut cmd = tokio::process::Command::new("bash");
+        cmd.arg("-c").arg(&args.command);
+        if let Some(cwd) = &args.cwd {
+            cmd.current_dir(cwd);
+        }
+        let output = cmd
+            .output()
+            .await
+            .map_err(|e| ToolError::ToolCallError(e.to_string().into()))?;
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let exit_code = output.status.code().unwrap_or(-1);
+
+        let mut result = String::new();
+        if !stdout.is_empty() {
+            result.push_str(&stdout);
+        }
+        if !stderr.is_empty() {
+            if !result.is_empty() {
+                result.push('\n');
+            }
+            result.push_str("[stderr]\n");
+            result.push_str(&stderr);
+        }
+        if exit_code != 0 {
+            result.push_str(&format!("\n[exit code: {exit_code}]"));
+        }
+
+        Ok(result)
     }
 }
