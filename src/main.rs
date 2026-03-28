@@ -1,15 +1,15 @@
 use rig::client::{CompletionClient, ProviderClient};
 use rig::completion::Prompt;
-use rig::providers::anthropic;
+use rig::providers::openai;
 
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
     // Create OpenAI client
-    let client = anthropic::Client::new("API KEY")?;
+    let client = openai::Client::from_env();
 
     // Create agent with a single context prompt
     let comedian_agent = client
-        .agent("")
+        .agent("gpt-5.2")
         .preamble("You are a comedian here to entertain the user using humour and jokes.")
         .build();
 
