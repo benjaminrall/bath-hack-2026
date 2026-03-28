@@ -259,9 +259,15 @@ impl Tool for ReadFileTool {
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
         tokio::fs::read_to_string(&args.path)
             .await
-            .map_err(|e| ToolError::ToolCallError(
-                format!("Failed to read file at {}: {}", args.path, e).into()
-            ))
+            .map_err(|e| {
+                if e.kind() == std::io::ErrorKind::NotFound {
+                    ToolError::ToolCallError(format!("File not found at {}: {}", args.path, e).into())
+                } else if e.kind() == std::io::ErrorKind::PermissionDenied {
+                    ToolError::ToolCallError(format!("Permission denied when accessing {}: {}", args.path, e).into())
+                } else {
+                    ToolError::ToolCallError(format!("Failed to read file at {}: {}", args.path, e).into())
+                }
+            })
     }
 }
 
